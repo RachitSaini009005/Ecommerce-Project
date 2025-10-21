@@ -6,12 +6,13 @@ from django.shortcuts import render
 # from psutil import users
 from django.contrib.auth import get_user_model
 from rest_framework.request import Request
-from rest_framework.decorators import api_view  # this is used to convert the function based views to the the readymade api view which can handle the different request, json responses
+from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view,permission_classes # this is used to convert the function based views to the the readymade api view which can handle the different request, json responses
 from rest_framework.response import Response # this is used to send the wrapped data in the form of json to the client
 from rest_framework import status # this is used to send the userfrindly readable status instead of raw of numbers status
 
 @api_view(['GET','POST'])  # This means the function only accepts the post request  else it will show error "method not allowed"
-
+@permission_classes([AllowAny]) 
 def register_user(request: Request): # request contains the submited form data ,, user information, content_type, auth_token 
 
    email = request.data.get("email")  # this is used to get the email data from request.data
@@ -39,4 +40,14 @@ def register_user(request: Request): # request contains the submited form data ,
 
 
 
- 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def debug_token(request):
+    return Response({
+        "user": str(request.user),
+        "token_valid": True
+    })

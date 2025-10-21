@@ -1,36 +1,68 @@
 from django.shortcuts import render
-from django.db import models
 from django.contrib.auth import get_user_model
-# from huggingface_hub import User
-# from stripe import Price 
- #  Gets the blueprint (class) of the active User model so you can work with user data
-# Create your views here.
+from django.core.cache import cache
 
+from rest_framework import viewsets
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
 
-# name , price, description, owner, created at
-# class Products(models.Model):
-#     name = models.CharField(max_length=100)
-#     Price = models.DecimalField(null=False,blank=False,max_digits=10,decimal = 2)
-#     description = models.TextField(blank=True)
-#     owner = models.ForeignKey(User , on_delete= models.CASCADE, related_name= "products")
-#     created_at = models.DateTimeField(auto_now_add=True)
-
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.generics import ListAPIView
-from rest_framework.permissions import IsAuthenticated,AllowAny
-from .models import Product
-from .serializers import ProductSerializer
+from .models import Product, Categories
+from .serializers import ProductSerializer, CategoriesSerializer
 from .permissions import IsAdminOrOwnerOrReadOnly
+
 User = get_user_model()
-class ProductViewSet(ModelViewSet):  #ModelViewSet is used to give ready made crud operations which requires less line of code
-    queryset = Product.objects.all().order_by("-created_at")# this is used to get all the products list  order in descending order based on the given field
-    
-    serializer_class = ProductSerializer    # this is used to serilize the data in the json
-    permission_classes = [IsAdminOrOwnerOrReadOnly,IsAuthenticated]  # core rule  the staff admin can add a product and non ogin users can only view the products
+
+
+class ProductViewSet(viewsets.ModelViewSet):
+    """
+    CRUD operations for Products with caching, pagination, and filtering.
+    """
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    permission_classes = [IsAdminOrOwnerOrReadOnly]
+
+    def list(self, request, *args, **kwargs):
+        # Generate a unique cache key per URL including query params
+        cache_key = f"products_{request.get_full_path()}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data)
+
+        # Get queryset with category to optimize queries
+        queryset = self.filter_queryset(self.get_queryset().select_related('category'))
+
+        # Pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            cache.set(cache_key, serializer.data, timeout=3600)  # Cache for 1 hour
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        cache.set(cache_key, serializer.data, timeout=3600)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)  # <- when someone creates a product, don’t just save it — also tag it with the user who created it.
+        serializer.save()
+        cache.clear()  # Clear all cache to reflect new product
 
-from rest_framework.viewsets import ModelViewSet
+    def perform_update(self, serializer):
+        serializer.save()
+        cache.clear()  # Clear cache on update
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        cache.clear()  # Clear cache on delete
 
 
+class CategoryViewSet(viewsets.ModelViewSet):
+    """
+    CRUD operations for Categories.
+    """
+    queryset = Categories.objects.all()
+    serializer_class = CategoriesSerializer
+    permission_classes = [IsAdminOrOwnerOrReadOnly]
+
+    def perform_create(self, serializer):
+        # Tag the category with the user who created it
+        serializer.save(owner=self.request.user)
